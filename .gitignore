@@ -214,5 +214,19 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-# Streamlit
+# Stream-lit
 .streamlit/secrets.toml
+
+# Jupyter
+.ipynb_checkpoints/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+__MACOSX/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
