@@ -3,7 +3,6 @@ name: dl
 channels:
   - pytorch
   - conda-forge
-  - defaults
 
 dependencies:
   # ── Python ────────────────────────────────────────────────────────────────
@@ -17,13 +16,17 @@ dependencies:
   - scikit-learn
   - scipy
 
-  # ── Deep learning (CPU build — swap for pytorch-cuda if GPU is available) ─
+  # ── Deep learning (CPU) ───────────────────────────────────────────────────
+  # Remove cpuonly and change to pytorch-cuda=12.1 if the node has a GPU
   - pytorch::pytorch=2.11.0
   - pytorch::torchaudio=2.11.0
   - pytorch::torchvision=0.26.0
-  - cpuonly                        # remove this line if the node has a CUDA GPU
+  - pytorch::cpuonly
 
   # ── Hugging Face stack ────────────────────────────────────────────────────
+  # pyarrow is left unpinned so conda-forge resolves the correct CPU build.
+  # Pinning to =23.0.1 caused a __cuda conflict on CPU-only nodes.
+  - conda-forge::pyarrow
   - conda-forge::datasets
   - conda-forge::evaluate
   - conda-forge::transformers
@@ -33,7 +36,7 @@ dependencies:
 
   # ── Tuning & utilities ────────────────────────────────────────────────────
   - conda-forge::optuna
-  - conda-forge::sqlalchemy        # required for Optuna SQLite storage
+  - conda-forge::sqlalchemy
   - conda-forge::tqdm
   - conda-forge::requests
   - conda-forge::filelock
@@ -44,16 +47,15 @@ dependencies:
   - conda-forge::multiprocess
   - conda-forge::dill
   - conda-forge::fsspec
-  - conda-forge::pyarrow
   - conda-forge::aiohttp
 
-  # ── Jupyter (optional — comment out if running headless on the node) ──────
+  # ── Jupyter (comment out if running fully headless) ───────────────────────
   - conda-forge::jupyterlab
   - conda-forge::ipykernel
   - conda-forge::ipywidgets
   - conda-forge::notebook
 
-  # ── Pip-only packages ─────────────────────────────────────────────────────
+  # ── Pip-only ──────────────────────────────────────────────────────────────
   - pip
   - pip:
-    - alembic                      # Optuna migration backend
+    - alembic
