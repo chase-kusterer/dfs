@@ -30,6 +30,8 @@ from   tqdm import tqdm
 # data science dependencies
 import numpy as np
 import pandas as pd
+import matplotlib
+matplotlib.use("Agg")          # non-interactive backend — no display required
 import matplotlib.pyplot as plt
 import seaborn as sns
 
@@ -112,6 +114,9 @@ DEVICE = torch.device(
     "cuda" if torch.cuda.is_available()
     else ("mps" if torch.backends.mps.is_available() else "cpu")
 )
+
+# ensure output directory exists for plots and saved models
+os.makedirs("outputs", exist_ok=True)
 
 
 # Step 1B: Import Shared Utilities
@@ -555,7 +560,26 @@ if best_state is not None:
 
 
 # ### 7.2 Plot Training and Validation Curves
-plot_training_history(history)
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+
+epochs_range = range(1, len(history.history["loss"]) + 1)
+
+ax1.plot(epochs_range, history.history["loss"],     label="Train Loss",     color="steelblue")
+ax1.plot(epochs_range, history.history["val_loss"], label="Val Loss",       color="orange")
+ax1.set_xlabel("Epoch"); ax1.set_ylabel("Loss")
+ax1.set_title("Training vs Validation Loss", fontweight="bold")
+ax1.legend(); ax1.grid(True, alpha=0.3)
+
+ax2.plot(epochs_range, history.history["accuracy"],     label="Train Accuracy", color="steelblue")
+ax2.plot(epochs_range, history.history["val_accuracy"], label="Val Accuracy",   color="orange")
+ax2.set_xlabel("Epoch"); ax2.set_ylabel("Token Accuracy")
+ax2.set_title("Training vs Validation Accuracy", fontweight="bold")
+ax2.legend(); ax2.grid(True, alpha=0.3)
+
+plt.tight_layout()
+plt.savefig("outputs/training_curves.png", dpi=150, bbox_inches="tight")
+plt.close()
+print("📊 Training curves saved to outputs/training_curves.png")
 
 
 # ### 7.3 Evaluate on the Test Set
@@ -726,7 +750,9 @@ ax2.set_title("Box Plot of BLEU Scores", fontsize=14, fontweight="bold")
 ax2.grid(True, alpha=0.3, axis="y")
 
 plt.tight_layout()
-plt.show()
+plt.savefig("outputs/bleu_distribution.png", dpi=150, bbox_inches="tight")
+plt.close()
+print("📊 BLEU distribution saved to outputs/bleu_distribution.png")
 
 print(f"\n📊 From the visualization:")
 print(f"   - Most scores cluster around {stats['median']:.2f}")
