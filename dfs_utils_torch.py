@@ -2,8 +2,6 @@
 assignment3_utils_torch.py
 ==========================
 
-PyTorch port of the Keras-based `assignment3_utils.py` used in MSDS 458 Assignment 3.
-
 Provides:
 - Data loading & processing for the MBPP dataset (`prepare_training_data`).
 - A simple Keras-style `TextVectorization` replacement (`TextVectorizer`).
@@ -13,9 +11,6 @@ Provides:
 - Greedy and "best" (top-p + repetition penalty) generation utilities.
 - BLEU + syntax-validity evaluation utilities used by Parts A, B, and C.
 - Batch generation helpers for HuggingFace seq2seq models (used in Parts B & C).
-
-This module replaces both the original `assignment3_utils.py` and the parts of
-the Keras notebooks that built model components inline.
 """
 
 from __future__ import annotations
@@ -128,6 +123,7 @@ def process_dataset_split(split_data, dataset_name: str, max_examples: int) -> D
     return {"prompts": prompts, "code": codes}
 
 
+# pulling data from hugging face
 def prepare_training_data(dataset_name: Optional[str] = None) -> Dict[str, Dict[str, List[str]]]:
     """Load + process MBPP / CodeContests into prompts/code lists for each split.
 
@@ -174,7 +170,7 @@ def _default_split(text: str) -> List[str]:
 
 class TextVectorizer:
     """
-    Lightweight, Keras-compatible TextVectorization replacement.
+    Lightweight TextVectorization replacement.
 
     - Lowercases input by default.
     - Builds an integer vocabulary capped at `max_tokens` (reserving idx 0 for
@@ -834,11 +830,7 @@ def batch_generate_codes(
 def add_python_hint(prompt: str) -> str:
     """
     Add an explicit "Python:\\n" prefix unless the prompt already mentions
-    Python in its first 20 characters.
-
-    This matches the original `assignment3_utils.add_python_hint` exactly so
-    that BLEU evaluations are comparable across the Keras and PyTorch ports.
-    """
+    Python in its first 20 characters for BLEU evaluations."""
     if "python" in prompt.lower()[:20]:
         return prompt
     return f"Python:\n{prompt}"
