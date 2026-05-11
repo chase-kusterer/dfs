@@ -1,0 +1,59 @@
+name: dl
+
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+
+dependencies:
+  # ── Python ────────────────────────────────────────────────────────────────
+  - python=3.11
+
+  # ── Core data science ─────────────────────────────────────────────────────
+  - numpy
+  - pandas
+  - matplotlib
+  - seaborn
+  - scikit-learn
+  - scipy
+
+  # ── Deep learning (CPU build — swap for pytorch-cuda if GPU is available) ─
+  - pytorch::pytorch=2.11.0
+  - pytorch::torchaudio=2.11.0
+  - pytorch::torchvision=0.26.0
+  - cpuonly                        # remove this line if the node has a CUDA GPU
+
+  # ── Hugging Face stack ────────────────────────────────────────────────────
+  - conda-forge::datasets
+  - conda-forge::evaluate
+  - conda-forge::transformers
+  - conda-forge::tokenizers
+  - conda-forge::safetensors
+  - conda-forge::huggingface_hub
+
+  # ── Tuning & utilities ────────────────────────────────────────────────────
+  - conda-forge::optuna
+  - conda-forge::sqlalchemy        # required for Optuna SQLite storage
+  - conda-forge::tqdm
+  - conda-forge::requests
+  - conda-forge::filelock
+  - conda-forge::pyyaml
+  - conda-forge::packaging
+  - conda-forge::regex
+  - conda-forge::xxhash
+  - conda-forge::multiprocess
+  - conda-forge::dill
+  - conda-forge::fsspec
+  - conda-forge::pyarrow
+  - conda-forge::aiohttp
+
+  # ── Jupyter (optional — comment out if running headless on the node) ──────
+  - conda-forge::jupyterlab
+  - conda-forge::ipykernel
+  - conda-forge::ipywidgets
+  - conda-forge::notebook
+
+  # ── Pip-only packages ─────────────────────────────────────────────────────
+  - pip
+  - pip:
+    - alembic                      # Optuna migration backend

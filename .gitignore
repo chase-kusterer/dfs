@@ -230,3 +230,10 @@ __MACOSX/
 __pycache__/
 *.pyc
 *.pyo
+
+# DFS study outputs
+*.pt
+*.db
+tuning_results_mbpp.csv
+transformer_mbpp.pt
+optuna_mbpp.db
