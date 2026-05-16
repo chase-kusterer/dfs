@@ -44,11 +44,10 @@ from dfs_utils_torch import (
 )
 
 # ── Environment ───────────────────────────────────────────────────────────────
-# Use None (not "") so transformers doesn't send a bare "Bearer " header
 hf_token = os.getenv("HF_TOKEN") or None
 os.environ["HF_HUB_DISABLE_IMPLICIT_TOKEN"]  = "1"
 os.environ["DISABLE_SAFETENSORS_CONVERSION"] = "1"
-os.environ["HF_HUB_DISABLE_PROGRESS_BARS"]  = "0"
+os.environ["HF_HUB_DISABLE_PROGRESS_BARS"]   = "0"
 
 # ── Seeds ─────────────────────────────────────────────────────────────────────
 SEED = 702
@@ -61,25 +60,23 @@ if torch.cuda.is_available():
 # --- HYPERPARAMETER TUNING CONFIGURATION ---
 # Tuning ranges — objective() reads directly from these
 config = {
-    "max_input_length"  : {"type": "int", "low": 64,  "high": 128, "step": 64},   # was 256 — large sequences slow MPS
-    "max_target_length" : {"type": "int", "low": 128, "high": 256, "step": 128},  # was 512
-    "batch_size"        : {"type": "categorical", "choices": [4, 8]},               # capped at 8 to avoid MPS OOM
+    "max_input_length"  : {"type": "int", "low": 64,  "high": 256, "step": 64},
+    "max_target_length" : {"type": "int", "low": 128, "high": 512, "step": 128},
+    "batch_size"        : {"type": "categorical", "choices": [4, 8, 16, 32, 64]},
 }
 
 tuning_config = {
     "learning_rate"        : {"type": "float", "low": 1e-5, "high": 5e-4, "log": True},
     "warmup_ratio"         : {"type": "float", "low": 0.05, "high": 0.30},
     "weight_decay"         : {"type": "float", "low": 0.0,  "high": 0.1},
-    "num_beams"            : {"type": "int",   "low": 2,    "high": 4},            # was 8 — beam cost scales linearly
-    "max_new_tokens"       : {"type": "int",   "low": 64,   "high": 128, "step": 64},  # was 512 — biggest val slowdown
+    "num_beams"            : {"type": "int",   "low": 1,    "high": 8},
+    "max_new_tokens"       : {"type": "int",   "low": 64,   "high": 512,  "step": 64},
     "no_repeat_ngram_size" : {"type": "int",   "low": 2,    "high": 5},
 }
 
 # Fixed training constants (not tuned)
-EPOCHS         = 25   # used for final model training
-PATIENCE       = 10   # used for final model training
-TRIAL_EPOCHS   = 7    # max epochs per Optuna trial — enough to compare, not enough to waste hours
-TRIAL_PATIENCE = 3    # early stop trials faster
+EPOCHS   = 25
+PATIENCE = 10
 
 # ── Device ────────────────────────────────────────────────────────────────────
 DEVICE = torch.device(
@@ -114,8 +111,6 @@ print(f"   Test:  {len(test_prompts)}  examples")
 # =============================================================================
 print(f"\nLoading pretrained model: {MODEL_NAME}")
 
-from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, get_linear_schedule_with_warmup
-
 tokenizer = AutoTokenizer.from_pretrained(
     MODEL_NAME,
     token    = hf_token,
@@ -124,7 +119,8 @@ tokenizer = AutoTokenizer.from_pretrained(
 
 model = AutoModelForSeq2SeqLM.from_pretrained(
     MODEL_NAME,
-    token = hf_token,
+    use_safetensors = False,
+    token           = hf_token,
 ).to(DEVICE)
 
 print(f"Model and tokenizer loaded on {DEVICE}!")
@@ -212,8 +208,9 @@ class CodeT5Dataset(Dataset):
             truncation  = True,
             return_tensors = "pt",
         )
-        dec = self.tokenizer(
-                text_target = self.codes[idx],
+        with self.tokenizer.as_target_tokenizer():
+            dec = self.tokenizer(
+                self.codes[idx],
                 max_length  = self.max_target_len,
                 padding     = "max_length",
                 truncation  = True,
@@ -271,10 +268,6 @@ def generate_code(prompt, trial_model, num_beams, max_new_tokens,
 # =============================================================================
 def objective(trial):
 
-    # Clear MPS cache before each trial to free any lingering allocations
-    if torch.backends.mps.is_available():
-        torch.mps.empty_cache()
-
     # 1. Suggest hyperparameters for this trial (ranges defined in config and tuning_config)
     c  = config
     tc = tuning_config
@@ -291,8 +284,8 @@ def objective(trial):
     batch_size = trial.suggest_categorical(
         "batch_size", c["batch_size"]["choices"],
     )
-    epochs   = TRIAL_EPOCHS
-    patience = TRIAL_PATIENCE
+    epochs   = EPOCHS
+    patience = PATIENCE
 
     # from tuning_config
     learning_rate = trial.suggest_float(
@@ -316,9 +309,8 @@ def objective(trial):
         "no_repeat_ngram_size", tc["no_repeat_ngram_size"]["low"], tc["no_repeat_ngram_size"]["high"],
     )
 
-    # 2. Deep-copy on CPU first, then move to device — avoids holding two 220M models on MPS at once
-    trial_model = copy.deepcopy(model.cpu()).to(DEVICE)
-    model.to(DEVICE)  # restore original to device
+    # 2. Deep-copy the pretrained model so each trial starts from the same weights
+    trial_model = copy.deepcopy(model).to(DEVICE)
     trial_model.train()
 
     # 3. Build DataLoaders
@@ -362,9 +354,6 @@ def objective(trial):
 
         # — Training pass —
         trial_model.train()
-        GRAD_ACCUM_STEPS = 4   # accumulate 4 steps → effective batch = batch_size × 4
-        optimizer.zero_grad()
-        step_count = 0
         for batch in tqdm(train_loader, desc=f"  Trial {trial.number} | Epoch {epoch}", leave=False):
             input_ids      = batch["input_ids"].to(DEVICE)
             attention_mask = batch["attention_mask"].to(DEVICE)
@@ -375,29 +364,17 @@ def objective(trial):
                 attention_mask = attention_mask,
                 labels         = labels,
             )
-            loss = outputs.loss / GRAD_ACCUM_STEPS
+            loss = outputs.loss
+            optimizer.zero_grad()
             loss.backward()
-            step_count += 1
-
-            if step_count % GRAD_ACCUM_STEPS == 0:
-                torch.nn.utils.clip_grad_norm_(trial_model.parameters(), max_norm=1.0)
-                optimizer.step()
-                scheduler.step()
-                optimizer.zero_grad()
-
-        # Flush any remaining accumulated gradients at end of epoch
-        if step_count % GRAD_ACCUM_STEPS != 0:
             torch.nn.utils.clip_grad_norm_(trial_model.parameters(), max_norm=1.0)
             optimizer.step()
             scheduler.step()
-            optimizer.zero_grad()
 
-        # — Validation pass: subsample 30 examples for speed during tuning —
+        # — Validation pass: compute mean BLEU on val set —
         trial_model.eval()
         val_bleu_scores = []
-        val_sample_prompts = val_prompts[:30]
-        val_sample_codes   = val_code[:30]
-        for vp, vc in zip(val_sample_prompts, val_sample_codes):
+        for vp, vc in zip(val_prompts, val_code):
             generated = generate_code(vp, trial_model, num_beams,
                                        max_new_tokens, no_repeat_ngram_size,
                                        max_input_length)
@@ -501,8 +478,6 @@ for epoch in range(1, EPOCHS + 1):
     final_model.train()
     epoch_loss = 0.0
     n_batches  = 0
-    GRAD_ACCUM_STEPS = 4
-    final_optimizer.zero_grad()
 
     for batch in tqdm(train_loader_full,
                       desc = f"Final training | Epoch {epoch}"):
@@ -515,24 +490,15 @@ for epoch in range(1, EPOCHS + 1):
             attention_mask = attention_mask,
             labels         = labels,
         )
-        loss = outputs.loss / GRAD_ACCUM_STEPS
+        loss = outputs.loss
+        final_optimizer.zero_grad()
         loss.backward()
-        n_batches += 1
-
-        if n_batches % GRAD_ACCUM_STEPS == 0:
-            torch.nn.utils.clip_grad_norm_(final_model.parameters(), max_norm=1.0)
-            final_optimizer.step()
-            final_scheduler.step()
-            final_optimizer.zero_grad()
-
-        epoch_loss += outputs.loss.item()  # log unscaled loss
-
-    # Flush remaining gradients
-    if n_batches % GRAD_ACCUM_STEPS != 0:
         torch.nn.utils.clip_grad_norm_(final_model.parameters(), max_norm=1.0)
         final_optimizer.step()
         final_scheduler.step()
-        final_optimizer.zero_grad()
+
+        epoch_loss += loss.item()
+        n_batches  += 1
 
     mean_epoch_loss = epoch_loss / max(1, n_batches)
     train_losses.append(mean_epoch_loss)
